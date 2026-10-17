@@ -1,0 +1,4 @@
+{
+  "error": "invalid_grant",
+  "error_description": "AADB2C90080: The provided grant has expired. Please re-authenticate and try again.\r\nCorrelation ID: 00000000-0000-0000-0000-000000000000\r\nTimestamp: 2026-10-17 10:00:00Z\r\n"
+}

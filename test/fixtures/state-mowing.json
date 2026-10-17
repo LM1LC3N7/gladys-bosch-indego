@@ -1,0 +1,18 @@
+{
+  "state": 513,
+  "map_update_available": true,
+  "mowed": 42,
+  "mowmode": 2,
+  "error": 0,
+  "xPos": 5,
+  "yPos": 50,
+  "runtime": {
+    "total": { "operate": 81329, "charge": 11912 },
+    "session": { "operate": 10, "charge": 0 }
+  },
+  "mapsvgcache_ts": 1593609416617,
+  "svg_xPos": 720,
+  "svg_yPos": 424,
+  "config_change": false,
+  "mow_trig": true
+}

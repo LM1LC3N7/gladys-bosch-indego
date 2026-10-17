@@ -1,0 +1,29 @@
+{
+  "runtime": {
+    "total": { "operate": 81106, "charge": 11834 },
+    "session": { "operate": 12, "charge": 12 }
+  },
+  "battery": {
+    "voltage": 8.6,
+    "cycles": 1,
+    "discharge": 0.0,
+    "ambient_temp": 23,
+    "battery_temp": 23,
+    "percent": 86
+  },
+  "garden": {
+    "id": 34,
+    "name": 1,
+    "signal_id": 4,
+    "size": 80,
+    "inner_bounds": 238,
+    "cuts": 61172,
+    "runtime": 12,
+    "charge": 11834,
+    "bumps": 183,
+    "stops": 10,
+    "last_mow": 6,
+    "map_cell_size": 120
+  },
+  "hmiKeys": 213
+}

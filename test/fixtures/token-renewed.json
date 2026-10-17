@@ -1,0 +1,9 @@
+{
+  "access_token": "eyJ.access-token-2.sig",
+  "id_token": "eyJ.id-token-2.sig",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "https://prodindego.onmicrosoft.com/indego-mobile-api/Indego.Mower.User openid offline_access",
+  "refresh_token": "refresh-token-2",
+  "refresh_token_expires_in": 1209600
+}

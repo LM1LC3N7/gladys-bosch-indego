@@ -1,177 +1,245 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Bosch Indego",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Unofficial connector: Bosch Indego mowers, state, battery, progress, alerts, mow, pause, dock.",
+    "fr": "Connecteur non officiel : tondeuses Bosch Indego, état, batterie, alertes, tonte, pause, retour."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-bosch-indego:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-bosch-indego/main/cover.png",
+  "categories": ["appliances"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Bosch Indego in Gladys",
+        "fr": "Les tondeuses Bosch Indego dans Gladys"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Unofficial connector, not affiliated with Bosch. It reads your Bosch Indego robotic mowers through the Bosch cloud, with the Bosch SingleKey ID account of the Indego app: one device per mower (state, battery, activity, mowing progress, next mowing, unread alerts, last alert, online), a mow / pause select and a back-to-the-station button, and a scene trigger on new alerts. Never tested yet on a real account or mower. Indego and Bosch are trademarks of their owner.",
+        "fr": "Connecteur non officiel, sans lien avec Bosch. Il lit vos tondeuses robots Bosch Indego par le cloud Bosch, avec le compte Bosch SingleKey ID de l'application Indego : un appareil par tondeuse (état, batterie, activité, progression de la tonte, prochaine tonte, alertes non lues, dernière alerte, en ligne), un choix tondre / pause et un bouton de retour à la station, et un déclencheur de scène sur les nouvelles alertes. Jamais testé pour l'instant sur un vrai compte ni une vraie tondeuse. Indego et Bosch sont des marques de leur propriétaire."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-bosch-indego/blob/main/docs/fr.md",
+          "label": {
+            "en": "Guide (French)",
+            "fr": "Guide (français)"
+          }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-bosch-indego/blob/main/docs/en.md",
+          "label": {
+            "en": "Guide (English)",
+            "fr": "Guide (anglais)"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+      "key": "sign_in_steps",
+      "type": "section",
+      "label": {
+        "en": "Signing in, in two steps",
+        "fr": "Se connecter, en deux temps"
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
+      "description": {
+        "en": "Bosch only sends the sign-in back to its own app, so: 1. Click Connect below (or the \"Start the sign-in\" action) and open the address in a computer browser. 2. Before signing in, open the developer tools (F12), Console tab. 3. Sign in with your Bosch SingleKey ID: the page then stops and the console shows \"Failed to launch 'com.bosch.indegoconnect://login?…'\" (or, in the Network tab, the Location header of the \"authresp\" request). 4. Copy that address, or the whole line, into the \"Finish the sign-in\" action at the bottom of this screen, within 15 minutes. Gladys then keeps a renewal token in its database, in clear like every configuration value: never shown again, sent only to Bosch.",
+        "fr": "Bosch ne renvoie la connexion qu'à sa propre application, d'où deux temps : 1. Cliquez sur Connecter ci-dessous (ou sur l'action « Démarrer la connexion ») et ouvrez l'adresse dans le navigateur d'un ordinateur. 2. Avant de vous connecter, ouvrez les outils de développement (F12), onglet Console. 3. Connectez-vous avec votre Bosch SingleKey ID : la page s'arrête et la console affiche « Failed to launch 'com.bosch.indegoconnect://login?…' » (ou, dans l'onglet Réseau, l'en-tête Location de la requête « authresp »). 4. Copiez cette adresse, ou toute la ligne, dans l'action « Terminer la connexion » en bas de cet écran, dans les 15 minutes. Gladys garde ensuite un jeton de renouvellement dans sa base, en clair comme toute valeur de configuration : jamais réaffiché, envoyé seulement à Bosch."
+      }
     },
     {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
+      "key": "account",
+      "type": "account_link",
+      "label": {
+        "en": "Bosch SingleKey ID account",
+        "fr": "Compte Bosch SingleKey ID"
       },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
+      "description": {
+        "en": "Opens the Bosch sign-in page (step 1 above). Then finish with the \"Finish the sign-in\" action.",
+        "fr": "Ouvre la page de connexion Bosch (étape 1 ci-dessus). Terminez ensuite avec l'action « Terminer la connexion »."
+      }
     },
     {
-      "key": "unit",
+      "key": "poll_minutes",
+      "type": "number",
+      "required": false,
+      "default": 5,
+      "min": 2,
+      "max": 60,
+      "label": {
+        "en": "Refresh interval while mowing (minutes)",
+        "fr": "Intervalle de relecture pendant la tonte (minutes)"
+      },
+      "description": {
+        "en": "The state (and the mowing progress) is read at this pace while the mower is out of its station, and at all times when the live state is off. Battery, alerts and next mowing are read every 10 minutes at most.",
+        "fr": "L'état (et la progression de la tonte) est relu à ce rythme quand la tondeuse est hors de sa station, et tout le temps quand l'état en direct est coupé. Batterie, alertes et prochaine tonte sont relues toutes les 10 minutes au plus."
+      }
+    },
+    {
+      "key": "longpoll",
+      "type": "boolean",
+      "required": false,
+      "default": true,
+      "label": {
+        "en": "Live state (long poll)",
+        "fr": "État en direct (longue interrogation)"
+      },
+      "description": {
+        "en": "The Bosch cloud holds one request per mower and answers as soon as the state changes (or after about 4 minutes). Turn it off if your network cuts long requests.",
+        "fr": "Le cloud Bosch garde une requête par tondeuse et répond dès que l'état change (ou au bout de 4 minutes environ). Coupez-la si votre réseau interrompt les requêtes longues."
+      }
+    },
+    {
+      "key": "language",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
       "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
-      "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+      "default": "fr",
+      "label": {
+        "en": "Language of the names and texts",
+        "fr": "Langue des noms et des textes"
       },
-      "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "options": [
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
+      "key": "start_sign_in",
+      "timeout_seconds": 10,
+      "label": {
+        "en": "Start the sign-in",
+        "fr": "Démarrer la connexion"
+      },
+      "description": {
+        "en": "Shows the Bosch sign-in address to open (the same as the Connect button).",
+        "fr": "Affiche l'adresse de connexion Bosch à ouvrir (la même que le bouton Connecter)."
+      }
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
+      "key": "finish_sign_in",
+      "timeout_seconds": 90,
+      "label": {
+        "en": "Finish the sign-in",
+        "fr": "Terminer la connexion"
+      },
+      "description": {
+        "en": "Paste the address the sign-in ended on (see the steps above).",
+        "fr": "Collez l'adresse sur laquelle la connexion s'est arrêtée (voir les étapes plus haut)."
+      },
       "fields": [
         {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
+          "key": "url",
+          "type": "string",
+          "required": true,
+          "label": {
+            "en": "Address starting with com.bosch.indegoconnect://login",
+            "fr": "Adresse commençant par com.bosch.indegoconnect://login"
+          },
+          "placeholder": {
+            "en": "com.bosch.indegoconnect://login?state=…&code=…",
+            "fr": "com.bosch.indegoconnect://login?state=…&code=…"
+          }
         }
       ]
+    },
+    {
+      "key": "test_connection",
+      "timeout_seconds": 90,
+      "label": {
+        "en": "Test Indego",
+        "fr": "Tester Indego"
+      },
+      "description": {
+        "en": "Reads the mowers of the account and shows their state and battery.",
+        "fr": "Lit les tondeuses du compte et affiche leur état et leur batterie."
+      }
     }
   ],
   "scene_triggers": [
     {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
+      "key": "mower_alert",
+      "label": {
+        "en": "Indego alert",
+        "fr": "Alerte Indego"
+      },
       "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+        "en": "A new unread alert of the Bosch cloud for a mower (stuck, lifted, blade reminder...), once per alert.",
+        "fr": "Une nouvelle alerte non lue du cloud Bosch pour une tondeuse (bloquée, soulevée, rappel de lame...), une fois par alerte."
       },
       "fields": [
         {
-          "key": "device",
+          "key": "mower",
           "type": "select",
           "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
+          "required": false,
+          "label": {
+            "en": "Mower (empty: any)",
+            "fr": "Tondeuse (vide : n'importe laquelle)"
+          }
         }
       ],
       "variables": [
         {
-          "key": "target",
+          "key": "mower_name",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
+          "label": {
+            "en": "Mower",
+            "fr": "Tondeuse"
+          }
+        },
+        {
+          "key": "code",
+          "type": "string",
+          "label": {
+            "en": "Error code",
+            "fr": "Code d'erreur"
+          }
+        },
+        {
+          "key": "headline",
+          "type": "string",
+          "label": {
+            "en": "Headline",
+            "fr": "Titre"
+          }
+        },
+        {
+          "key": "message",
+          "type": "string",
+          "label": {
+            "en": "Message",
+            "fr": "Message"
+          }
+        },
+        {
+          "key": "flag",
+          "type": "string",
+          "label": {
+            "en": "Level (warning, error...)",
+            "fr": "Niveau (warning, error...)"
+          }
         }
       ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

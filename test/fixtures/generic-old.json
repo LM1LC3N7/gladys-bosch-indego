@@ -1,0 +1,9 @@
+{
+  "alm_sn": "603100002",
+  "alm_name": "Verger",
+  "service_counter": 1200,
+  "needs_service": false,
+  "alm_mode": "calendar",
+  "bareToolnumber": "3600HA2300",
+  "alm_firmware_version": "00837.01043"
+}

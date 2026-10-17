@@ -1,0 +1,24 @@
+[
+  {
+    "alm_sn": "603100001",
+    "alert_id": "5efda84ffbf591182723be89",
+    "error_code": "104",
+    "headline": "Mower requires attention.",
+    "date": "2026-10-16T09:26:39.589Z",
+    "message": "Stop button activated. The Stop button has been activated. Please follow the instructions on the mower display.",
+    "read_status": "unread",
+    "flag": "warning",
+    "push": true
+  },
+  {
+    "alm_sn": "603100001",
+    "alert_id": "5efda84ffbf591182723be70",
+    "error_code": "ntfy_blade_life",
+    "headline": "Blade reminder.",
+    "date": "2026-10-10T08:00:00.000Z",
+    "message": "Please check the blades.",
+    "read_status": "read",
+    "flag": "info",
+    "push": true
+  }
+]
