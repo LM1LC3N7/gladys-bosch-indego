@@ -29,6 +29,7 @@ import {
   ACK_BUDGET,
   BACKOFF,
   COMMANDS,
+  GUARD_TTL,
   LIST_INTERVAL,
   LONGPOLL_MIN_GAP,
   OPERATING_ACTIVE,
@@ -52,7 +53,7 @@ import {
   mowerStates,
   parseExternalId,
 } from './devices.js';
-import { T } from './i18n.js';
+import { T, pick } from './i18n.js';
 import { IndegoAuth, tokenToStore } from './indego/auth.js';
 import { IndegoClient } from './indego/client.js';
 import { IndegoError, reasonOf } from './indego/errors.js';
@@ -72,11 +73,18 @@ const defaultTimers = { setTimeout, clearTimeout, setInterval, clearInterval };
 /** A sign-in problem nothing but a new sign-in can fix. */
 const isFinal = (err) => ['refused', 'no_token'].includes(err?.code);
 
-/** The activities in which a command changes nothing (it is not sent). */
-const ALREADY = {
+/**
+ * The only command ever skipped: a start while the mower already mows. A stop
+ * (pause, back to the station) is always sent: the cloud state can lag, and a
+ * lost stop order is worse than a useless one.
+ */
+const SKIPPABLE = { [COMMANDS.MOW]: new Set(['mowing']) };
+
+/** The activities that show a command took effect (they lift its guard). */
+const EXPECTED = {
   [COMMANDS.MOW]: new Set(['mowing']),
-  [COMMANDS.PAUSE]: new Set(['paused', 'docked', 'charging', 'idle', 'updating']),
-  [COMMANDS.DOCK]: new Set(['returning', 'docked', 'charging', 'updating']),
+  [COMMANDS.PAUSE]: new Set(['paused', 'idle', 'docked', 'charging']),
+  [COMMANDS.DOCK]: new Set(['returning', 'docked', 'charging']),
 };
 
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
@@ -111,6 +119,14 @@ export class IndegoApp {
     this.longpollTimers = new Map();
     /** serial -> timers of its read back after a command */
     this.readBackTimers = new Map();
+    /** serial -> AbortController of its pending long poll */
+    this.longpollAborts = new Map();
+    /**
+     * serial -> { command, at, startCode, moved }: the last command sent, until
+     * its expected state is seen after a move, or GUARD_TTL. While it stands,
+     * a different command is never skipped.
+     */
+    this.guards = new Map();
     this.records = new Map();
     /** A 429 pauses every call until then; a restart keeps it. */
     this.pausedUntil = 0;
@@ -127,6 +143,8 @@ export class IndegoApp {
     this.failures = 0;
     this.nextTryAt = 0;
     this.longpollFailures = new Map();
+    /** secondary read -> { failures, at }: its own back-off */
+    this.secondaryRetry = new Map();
     this.healthy = false;
     this.fatal = undefined;
   }
@@ -186,6 +204,10 @@ export class IndegoApp {
       this.timers.clearTimeout(timer);
     }
     this.longpollTimers.clear();
+    for (const controller of this.longpollAborts.values()) {
+      controller.abort();
+    }
+    this.longpollAborts.clear();
     for (const list of this.readBackTimers.values()) {
       list.forEach((timer) => this.timers.clearTimeout(timer));
     }
@@ -297,10 +319,11 @@ export class IndegoApp {
       try {
         Object.assign(record, genericOf(await this.client.generic(serial)));
       } catch (err) {
-        if (err.code !== 'api') {
+        if (err.code === 'rate_limited' || isFinal(err)) {
           throw err;
         }
-        // An answer without details: the mower is still listed.
+        // The details are secondary: the mower stays listed, read again next time.
+        this.logger.warn(`Details of ${safeId(serial)}: ${reasonOf(err)}`);
       }
     }
     for (const serial of [...this.records.keys()]) {
@@ -328,6 +351,17 @@ export class IndegoApp {
       return false;
     }
     record.code = state.code;
+    const guard = this.guards.get(serial);
+    if (guard) {
+      // Lifted by the expected state, but not by the starting one until the
+      // mower was seen moving (the cloud can lag behind the command).
+      if (state.code !== guard.startCode) {
+        guard.moved = true;
+      }
+      if (guard.moved && EXPECTED[guard.command].has(activityOf(state.code))) {
+        this.guards.delete(serial);
+      }
+    }
     if (state.mowed !== undefined) {
       record.mowed = state.mowed;
     }
@@ -401,8 +435,35 @@ export class IndegoApp {
   }
 
   /**
-   * One round of reads, each when it is due (all of them with `full`).
-   * The first failure stops the round; what was read is published anyway.
+   * A secondary read (battery, next mowing, alerts): its failure never
+   * stops the round. It is logged and tried again on its own back-off; only
+   * a 429 or a refused session goes up.
+   */
+  async secondary(key, now, full, read) {
+    const retry = this.secondaryRetry.get(key);
+    if (!full && retry && now < retry.at) {
+      return;
+    }
+    try {
+      await read();
+      this.secondaryRetry.delete(key);
+    } catch (err) {
+      if (err.code === 'rate_limited' || isFinal(err)) {
+        throw err;
+      }
+      const failures = (retry?.failures ?? 0) + 1;
+      this.secondaryRetry.set(key, {
+        failures,
+        at: now + BACKOFF[Math.min(failures - 1, BACKOFF.length - 1)],
+      });
+      this.logger.warn(`${key}: ${reasonOf(err)}`);
+    }
+  }
+
+  /**
+   * One round of reads, each when it is due (all of them with `full`). The
+   * list and the state are the main data: their failure stops the round;
+   * what was read is published anyway.
    */
   async refresh({ full = false } = {}) {
     const now = this.now();
@@ -422,19 +483,24 @@ export class IndegoApp {
         ) {
           await this.readState(record.serial);
         }
+        const id = safeId(record.serial);
         const busy = ACTIVE.has(activityOf(record.code)) || activityOf(record.code) === 'charging';
         if (full || now - record.operatingAt >= (busy ? OPERATING_ACTIVE : OPERATING_IDLE)) {
-          await this.readOperating(record.serial);
+          await this.secondary(`Battery of ${id}`, now, full, () =>
+            this.readOperating(record.serial),
+          );
         }
         if (full || now - record.nextMowAt >= SLOW_INTERVAL) {
-          await this.readNextMow(record.serial);
+          await this.secondary(`Next mowing of ${id}`, now, full, () =>
+            this.readNextMow(record.serial),
+          );
         }
       }
       if (
         this.records.size > 0 &&
         (full || this.alertsWanted || now - this.alertsAt >= SLOW_INTERVAL)
       ) {
-        await this.readAlerts();
+        await this.secondary('Alerts', now, full, () => this.readAlerts());
       }
       this.healthy = true;
       this.failures = 0;
@@ -512,10 +578,14 @@ export class IndegoApp {
       return;
     }
     let delay;
+    // stop() cancels it: a restart never leaves a request held for 4 minutes.
+    const controller = new AbortController();
+    this.longpollAborts.set(serial, controller);
     try {
       const data = await this.client.state(serial, {
         longpoll: true,
         last: this.records.get(serial).code ?? 0,
+        signal: controller.signal,
       });
       if (!current()) {
         return;
@@ -540,6 +610,10 @@ export class IndegoApp {
         this.longpollFailures.set(serial, failures);
         this.logger.warn(`Long poll of ${safeId(serial)}: ${reasonOf(err)}`);
         delay = BACKOFF[Math.min(failures - 1, BACKOFF.length - 1)];
+      }
+    } finally {
+      if (this.longpollAborts.get(serial) === controller) {
+        this.longpollAborts.delete(serial);
       }
     }
     if (current()) {
@@ -647,17 +721,26 @@ export class IndegoApp {
       await this.auth.finishSignIn(fields.url);
     } catch (err) {
       if (err.code === 'sign_in') {
-        return /code/.test(err.message) ? T.noCode : T.unknownSignIn;
+        return { truncated: T.truncated, unknown_sign_in: T.unknownSignIn }[err.kind] ?? T.noCode;
       }
       if (err.code === 'refused') {
-        return T.codeRefused(reasonOf(err));
+        return err.kind === 'cancelled' ? T.signInCancelled : T.signInFailed(err.detail);
       }
-      return T.unreachable(reasonOf(err));
+      return T.signInUnreachable(reasonOf(err));
     }
     this.logger.info('Signed in to Bosch');
     this.lastStatus = undefined;
-    await this.start(this.gladys.config ?? {});
-    return this.healthy ? T.signedIn(this.records.size) : T.signedInNoList;
+    // Answer at once (the reads can take long); the status follows.
+    this.restart();
+    return T.signedInStarting;
+  }
+
+  /** Start again in the background, with the configuration Gladys holds. */
+  restart() {
+    this.starting = this.start(this.gladys.config ?? {}).catch((err) =>
+      this.logger.error(`Start failed: ${err.message}`),
+    );
+    return this.starting;
   }
 
   // --- Commands ------------------------------------------------------------------------
@@ -670,7 +753,12 @@ export class IndegoApp {
         return record;
       }
     }
-    throw new Error(T.unknownMower(externalId));
+    throw this.say(T.unknownMower(externalId));
+  }
+
+  /** An error whose message is a text in the configured language (Gladys shows it). */
+  say(text, cause) {
+    return new Error(pick(text, this.config.language), cause ? { cause } : undefined);
   }
 
   /** One command at a time per mower; the others wait their turn (within their own budget). */
@@ -721,21 +809,21 @@ export class IndegoApp {
    */
   async runCommand(serial, command, deadline, featureId) {
     if (!this.auth.signedIn) {
-      throw new Error(T.notSignedIn.en);
+      throw this.say(T.notSignedInCommand);
     }
     if (this.fatal) {
-      throw new Error(T.refused.en);
+      throw this.say(T.refusedCommand);
     }
     let now = this.now();
     if (now < this.pausedUntil) {
-      throw new Error(T.commandRateLimited(this.pausedUntil - now));
+      throw this.say(T.commandRateLimited(this.pausedUntil - now));
     }
     if (this.auth.expired) {
-      throw new Error(T.commandSession);
+      throw this.say(T.commandSession);
     }
     const budget = deadline - now - SEND_RESERVE;
     if (budget < 300) {
-      throw new Error(T.commandTooSlow);
+      throw this.say(T.commandTooSlow);
     }
     let data;
     try {
@@ -744,19 +832,20 @@ export class IndegoApp {
       if (err.code === 'rate_limited' || isFinal(err)) {
         await this.failed(err);
       }
-      throw new Error(T.commandStateUnknown(reasonOf(err)), { cause: err });
+      throw this.say(T.commandStateUnknown(reasonOf(err)), err);
     }
     if (!this.records.has(serial) || !this.applyState(serial, data)) {
-      throw new Error(T.commandStateUnknown('no state in the answer'));
+      throw this.say(T.commandStateUnknown('no state in the answer'));
     }
     const activity = activityOf(this.records.get(serial).code);
     if (activity === 'offline') {
       this.publish([serial]).catch(() => {});
-      throw new Error(T.commandOffline);
+      throw this.say(T.commandOffline);
     }
     // Gladys shows the requested mode at once: let the next publication re-send the real one.
     this.gladys.forgetPublishedStates(featureId);
-    if (ALREADY[command].has(activity)) {
+    const guard = this.activeGuard(serial);
+    if (SKIPPABLE[command]?.has(activity) && !(guard && guard.command !== command)) {
       this.logger.info(`${safeId(serial)}: ${command} skipped, already ${activity}`);
       this.publish([serial]).catch(() => {});
       return;
@@ -764,20 +853,61 @@ export class IndegoApp {
     now = this.now();
     if (deadline - now < SEND_RESERVE) {
       this.publish([serial]).catch(() => {});
-      throw new Error(T.commandTooSlow);
+      throw this.say(T.commandTooSlow);
     }
+    // The request keeps its full timeout: it is never cut once sent. Gladys
+    // only waits until the deadline for the answer.
+    const put = this.client.command(serial, command);
+    this.guards.set(serial, {
+      command,
+      at: now,
+      startCode: this.records.get(serial).code,
+      moved: false,
+    });
+    // Sent or not, the state tells: read it back.
+    this.scheduleReadBack(serial);
+    let timer;
+    const late = new Promise((resolve) => {
+      timer = this.timers.setTimeout(() => resolve('late'), Math.max(0, deadline - now));
+    });
+    let outcome;
     try {
-      await this.client.command(serial, command, { timeout: deadline - now });
+      outcome = await Promise.race([put.then(() => 'ok'), late]);
     } catch (err) {
-      if (err.code === 'rate_limited' || isFinal(err)) {
-        await this.failed(err);
-      }
-      // Sent or not, the state tells: read it back.
-      this.scheduleReadBack(serial);
-      throw new Error(`Indego: ${reasonOf(err)}`, { cause: err });
+      await this.commandFailed(serial, command, err);
+      // A network failure or a timeout may come after the cloud got it.
+      throw this.say(
+        err.code === 'unreachable' ? T.commandUnconfirmed : T.commandFailed(reasonOf(err)),
+        err,
+      );
+    } finally {
+      this.timers.clearTimeout(timer);
+    }
+    if (outcome === 'late') {
+      put.then(
+        () => this.logger.info(`${safeId(serial)}: ${command} (confirmed late)`),
+        (err) => this.commandFailed(serial, command, err),
+      );
+      throw this.say(T.commandUnconfirmed);
     }
     this.logger.info(`${safeId(serial)}: ${command}`);
-    this.scheduleReadBack(serial);
+  }
+
+  /** The guard of a mower, while it stands. */
+  activeGuard(serial) {
+    const guard = this.guards.get(serial);
+    if (guard && this.now() - guard.at >= GUARD_TTL) {
+      this.guards.delete(serial);
+      return undefined;
+    }
+    return guard;
+  }
+
+  async commandFailed(serial, command, err) {
+    this.logger.warn(`${safeId(serial)}: ${command} failed (${reasonOf(err)})`);
+    if (err.code === 'rate_limited' || isFinal(err)) {
+      await this.failed(err);
+    }
   }
 
   scheduleReadBack(serial) {
@@ -826,15 +956,15 @@ export class IndegoApp {
       return T.rateLimited(this.pausedUntil - now);
     }
     if (this.fatal || !this.tickTimer) {
-      // Never started (or stopped): start for real.
-      await this.start(this.gladys.config ?? {});
-    } else {
-      try {
-        await this.refresh({ full: true });
-        await this.reportOk();
-      } catch (err) {
-        await this.failed(err);
-      }
+      // Never started (or stopped): start for real, in the background.
+      this.restart();
+      return T.starting;
+    }
+    try {
+      await this.refresh({ full: true });
+      await this.reportOk();
+    } catch (err) {
+      await this.failed(err);
     }
     if (this.fatal) {
       return isFinal(this.fatal) ? T.refused : T.unreachable(reasonOf(this.fatal));

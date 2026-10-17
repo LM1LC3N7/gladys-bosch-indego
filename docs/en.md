@@ -42,25 +42,34 @@ address starting with `com.bosch.indegoconnect://`), which no browser can
 open. The integration therefore signs in in two steps, without any browser
 extension:
 
+Do it on a computer (Chrome, Edge, Firefox, Safari with its developer menu
+turned on):
+
 1. In the **Configuration** tab, click **Connect** next to "Bosch SingleKey
-   ID account" (or the **Start the sign-in** action at the bottom, which
-   shows the same kind of address as text). Open the address in a computer
-   browser (Chrome, Edge, Firefox).
-2. **Before signing in**, open the developer tools of the browser: **F12**,
-   then the **Console** tab.
+   ID account": Gladys opens the Bosch sign-in page **in a new tab**. (The
+   **Start the sign-in** action at the bottom shows the same kind of address
+   as text, to open yourself.)
+2. **In that new tab, before typing your e-mail**, open the developer tools:
+   **F12** (**Cmd+Option+I** on a Mac), **Console** tab, and tick
+   **Preserve log** (Firefox: **Persist Logs**, in the settings of the
+   console), so the line survives the end of the sign-in.
 3. Sign in with your Bosch SingleKey ID (the e-mail and password of the
    Indego app). At the end the page stops, and the console shows a line
    like:
    `Failed to launch 'com.bosch.indegoconnect://login?state=…&code=…' because the scheme does not have a registered handler.`
-   If the console shows nothing (Firefox), open the **Network** tab instead,
+   The console shortens long addresses: **right-click the address** and
+   choose **Copy link address**. A text that contains "…" is cut short and
+   refused.
+   If the console shows nothing (Firefox often does not), open the
+   **Network** tab instead (with **Preserve log** / **Persist Logs**),
    click the last request named `authresp`, and copy the value of its
    **Location** response header.
-4. Copy that address (or the whole console line: the integration finds the
-   address in it) into the **Finish the sign-in** action, then click it,
+4. Paste that address into the **Finish the sign-in** action, then click it,
    **within 15 minutes** (the code expires quickly and serves once).
 
-The action answers "Signed in: N mowers found". The mowers then show up in
-the **Discovery** tab: add them.
+The action answers at once "Signed in. The mowers are being read"; the
+connection status follows, and the mowers show up in the **Discovery** tab
+within a minute: add them.
 
 ### What is kept, and where
 
@@ -77,6 +86,10 @@ The token is renewed by itself, 5 minutes before it expires. If Bosch refuses
 the renewal (password changed, session revoked, unused for too long), the
 integration stops calling Bosch and the connection status asks you to sign in
 again: start over at step 1.
+
+How long a session lasts is Bosch's choice (Azure AD B2C, not documented for
+Indego). With the usual B2C settings the renewal token keeps sliding while it
+is used, up to about **90 days**: expect to sign in again around then.
 
 ## Settings
 
@@ -116,11 +129,16 @@ command the integration:
 
 - runs one command at a time per mower;
 - reads the state of the mower right before, and does **not** send the
-  command when the state cannot be read, the mower is offline, or the
-  command would change nothing (back to the station while docked);
+  command when the state cannot be read or the mower is offline;
+- always sends a stop (pause, back to the station), even when the cloud
+  already shows the mower stopped: its state can lag. Only a start while
+  the mower already mows is skipped, and never within 90 seconds of another
+  command that the mower has not visibly followed yet;
 - refuses the command, before sending anything, when the cloud is too slow
   to answer within 3.5 seconds (Gladys gives up after 5 seconds): Gladys
   then shows an error and nothing was sent; try again;
+- once sent, never cuts the request: when Bosch does not answer in time,
+  Gladys shows "command sent, but not confirmed in time";
 - reads the state back 10 and 45 seconds later.
 
 ## Actions of the Configuration screen
@@ -137,11 +155,14 @@ command the integration:
   address; each address serves once.
 - _"Bosch refused the sign-in (invalid_grant …)"_: the code expired or was
   already used: start over.
+- _"This address was cut short by the console"_: copy it with a right-click,
+  **Copy link address**, or from the Network tab (see step 3).
+- _"Bosch could not be reached"_: paste the same address again within a few
+  minutes.
 - _"The Indego cloud gateway refuses the calls"_ (HTTP 403): the Azure
   gateway in front of the API blocks some requests; the integration tries
   again by itself.
-- The logs never contain a token, a code or a password. Set `LOG_LEVEL=debug`
-  for more detail.
+- The logs never contain a token, a code or a password.
 
 ## Credits
 

@@ -70,8 +70,31 @@ test('the pasted address: the plain one, the console line, the encoded HTML, a b
   const html =
     '<a href="com.bosch.indegoconnect%3a%2f%2flogin%3fstate%3dst3%26code%3dxyz">here</a>';
   assert.deepEqual([parseRedirect(html).state, parseRedirect(html).code], ['st3', 'xyz']);
-  assert.equal(parseRedirect('login?state=a&amp;code=b').code, 'b');
-  assert.equal(parseRedirect(`  ${'k'.repeat(40)}  `).code, 'k'.repeat(40));
+  assert.equal(parseRedirect('?state=a&amp;code=b').code, 'b');
+  assert.equal(parseRedirect('state=a&code=b').state, 'a');
+  // A bare code: a B2C code (base64url JWE, "eyJ…"), 4096 characters at most.
+  const bare = `eyJ${'k'.repeat(40)}`;
+  assert.equal(parseRedirect(`  ${bare}  `).code, bare);
+  assert.equal(parseRedirect('k'.repeat(40)), null);
+  assert.equal(parseRedirect(`eyJ${'k'.repeat(4100)}`), null);
+  // Decoded once only: an encoded value inside stays what Bosch sent.
+  const twice = 'com.bosch.indegoconnect%3a%2f%2flogin%3fstate%3dst4%26code%3da%252Bb';
+  assert.equal(parseRedirect(twice).code, 'a+b');
+  // An address that is not the app's redirect is refused, even with a code.
+  for (const other of [
+    'https://example.com/?code=abc&state=x',
+    'https://prodindego.b2clogin.com/prodindego.onmicrosoft.com/oauth2/authresp?code=abc',
+    'com.bosch.indegoconnect://other?code=abc',
+  ]) {
+    assert.equal(parseRedirect(other), null, other);
+  }
+  // Cut by the console.
+  for (const cut of [
+    "Failed to launch 'com.bosch.indegoconnect://login?state=s&code=eyJhbGci…'",
+    'com.bosch.indegoconnect://login?state=s&code=eyJhbGci...',
+  ]) {
+    assert.equal(parseRedirect(cut).truncated, true);
+  }
   const denied = parseRedirect(
     'com.bosch.indegoconnect://login?error=access_denied&error_description=AADB2C90091%3a+cancelled&state=s',
   );
@@ -205,6 +228,45 @@ test('a refused renewal stops for good; a failed one waits 1, 5, 15, 60 min', as
   await assert.rejects(auth.accessToken(), { code: 'refused' });
   await assert.rejects(auth.renewIfDue(), { code: 'refused' });
   assert.equal(fake.to('/token').length, calls, 'a refused refresh token is never tried again');
+});
+
+test('a sign-in without a renewal token is refused, never patched with the old one', async () => {
+  const { auth } = setup();
+  auth.load(tokenOf(TOKEN, FIXTURE_NOW));
+  fake.state.token = { access_token: 'only-access', expires_in: 3600 };
+  const url = auth.beginSignIn();
+  const err = await auth
+    .finishSignIn(redirect(new URL(url).searchParams.get('state'), fake.issueCode(url)))
+    .catch((e) => e);
+  assert.equal(err.code, 'refused');
+  assert.equal(err.detail, 'no renewal token in the answer');
+  assert.equal(auth.token.accessToken, TOKEN.access_token, 'the previous session is untouched');
+});
+
+test('a renewal still running when a sign-in finishes is dropped', async () => {
+  const { auth, clock } = setup();
+  auth.load(tokenOf(TOKEN, FIXTURE_NOW));
+  clock.now += 2 * 3600_000;
+  let release;
+  fake.state.fail.set('/token', (call) => {
+    if (call.body.grant_type === 'refresh_token') {
+      return new Promise((resolve) => {
+        release = () => resolve(json({ error: 'invalid_grant' }, 400));
+      });
+    }
+    fake.state.fail.delete('/token');
+    return json(RENEWED);
+  });
+  const renewing = auth.renew();
+  await new Promise((resolve) => setImmediate(resolve));
+  const url = auth.beginSignIn();
+  fake.state.codes.set('c3', new URL(url).searchParams.get('code_challenge'));
+  // The sign-in answer comes from the fail handler (RENEWED).
+  await auth.finishSignIn(redirect(new URL(url).searchParams.get('state'), 'c3'));
+  release();
+  await renewing;
+  assert.equal(auth.refused, false, 'the refusal of the old session is ignored');
+  assert.equal(auth.token.refreshToken, RENEWED.refresh_token);
 });
 
 test('the stored token: round trip, and junk ignored', () => {

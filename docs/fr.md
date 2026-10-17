@@ -45,26 +45,36 @@ Bosch SingleKey ID ne renvoie la connexion qu'à l'application Bosch Indego
 navigateur ne sait ouvrir. L'intégration se connecte donc en deux temps,
 sans extension de navigateur :
 
+Faites-le sur un ordinateur (Chrome, Edge, Firefox, Safari avec son menu
+Développement activé) :
+
 1. Dans l'onglet **Configuration**, cliquez sur **Connecter** à côté de
-   « Compte Bosch SingleKey ID » (ou sur l'action **Démarrer la connexion**
-   en bas, qui affiche le même genre d'adresse en texte). Ouvrez l'adresse
-   dans le navigateur d'un ordinateur (Chrome, Edge, Firefox).
-2. **Avant de vous connecter**, ouvrez les outils de développement du
-   navigateur : **F12**, puis l'onglet **Console**.
+   « Compte Bosch SingleKey ID » : Gladys ouvre la page de connexion Bosch
+   **dans un nouvel onglet**. (L'action **Démarrer la connexion** en bas
+   affiche le même genre d'adresse en texte, à ouvrir vous-même.)
+2. **Dans ce nouvel onglet, avant de saisir votre e-mail**, ouvrez les
+   outils de développement : **F12** (**Cmd+Option+I** sur Mac), onglet
+   **Console**, et cochez **Conserver le journal** (Firefox : **Journaux
+   persistants**, dans les réglages de la console), pour que la ligne
+   survive à la fin de la connexion.
 3. Connectez-vous avec votre Bosch SingleKey ID (l'e-mail et le mot de passe
    de l'application Indego). À la fin, la page s'arrête et la console affiche
    une ligne comme :
    `Failed to launch 'com.bosch.indegoconnect://login?state=…&code=…' because the scheme does not have a registered handler.`
-   Si la console n'affiche rien (Firefox), ouvrez plutôt l'onglet **Réseau**,
-   cliquez sur la dernière requête nommée `authresp` et copiez la valeur de
-   son en-tête de réponse **Location**.
-4. Copiez cette adresse (ou toute la ligne de la console : l'intégration y
-   trouve l'adresse) dans l'action **Terminer la connexion**, puis cliquez
-   dessus, **dans les 15 minutes** (le code expire vite et ne sert qu'une
-   fois).
+   La console raccourcit les adresses longues : faites un **clic droit sur
+   l'adresse** et choisissez **Copier l'adresse du lien**. Un texte qui
+   contient « … » est tronqué et refusé.
+   Si la console n'affiche rien (souvent le cas sous Firefox), ouvrez plutôt
+   l'onglet **Réseau** (avec **Conserver le journal** / **Journaux
+   persistants**), cliquez sur la dernière requête nommée `authresp` et
+   copiez la valeur de son en-tête de réponse **Location**.
+4. Collez cette adresse dans l'action **Terminer la connexion**, puis
+   cliquez dessus, **dans les 15 minutes** (le code expire vite et ne sert
+   qu'une fois).
 
-L'action répond « Connecté : N tondeuses trouvées ». Les tondeuses
-apparaissent alors dans l'onglet **Découverte** : ajoutez-les.
+L'action répond aussitôt « Connecté. Les tondeuses sont en cours de
+lecture » ; l'état de la connexion suit, et les tondeuses apparaissent dans
+l'onglet **Découverte** d'ici une minute : ajoutez-les.
 
 ### Ce qui est gardé, et où
 
@@ -82,6 +92,11 @@ Le jeton est renouvelé tout seul, 5 minutes avant son expiration. Si Bosch
 refuse le renouvellement (mot de passe changé, session révoquée, inutilisée
 trop longtemps), l'intégration cesse d'appeler Bosch et l'état de la
 connexion vous demande de vous reconnecter : reprenez à l'étape 1.
+
+La durée d'une session dépend de Bosch (Azure AD B2C, non documentée pour
+Indego). Avec les réglages B2C habituels, le jeton de renouvellement se
+prolonge tant qu'il sert, jusqu'à environ **90 jours** : attendez-vous à
+devoir vous reconnecter vers cette échéance.
 
 ## Réglages
 
@@ -123,12 +138,19 @@ commande, l'intégration :
 
 - n'exécute qu'une commande à la fois par tondeuse ;
 - relit l'état de la tondeuse juste avant, et n'envoie **pas** la commande
-  si l'état ne peut pas être lu, si la tondeuse est hors ligne, ou si la
-  commande ne changerait rien (retour à la station alors qu'elle y est) ;
+  si l'état ne peut pas être lu ou si la tondeuse est hors ligne ;
+- envoie toujours un arrêt (pause, retour à la station), même quand le cloud
+  montre déjà la tondeuse arrêtée : son état peut être en retard. Seul un
+  démarrage alors que la tondeuse tond déjà est écarté, et jamais dans les
+  90 secondes qui suivent une autre commande que la tondeuse n'a pas encore
+  visiblement suivie ;
 - refuse la commande, avant d'envoyer quoi que ce soit, quand le cloud est
   trop lent pour répondre en 3,5 secondes (Gladys abandonne au bout de
   5 secondes) : Gladys affiche alors une erreur et rien n'a été envoyé ;
   réessayez ;
+- une fois envoyée, ne coupe jamais la requête : si Bosch ne répond pas à
+  temps, Gladys affiche « commande envoyée, sans confirmation dans les
+  temps » ;
 - relit l'état 10 et 45 secondes après.
 
 ## Actions de l'écran de configuration
@@ -145,13 +167,17 @@ commande, l'intégration :
   dernières minutes »_ : cliquez à nouveau sur **Démarrer la connexion** (ou
   Connecter) et utilisez la nouvelle adresse ; chaque adresse ne sert qu'une
   fois.
-- _« Connexion refusée par Bosch (invalid_grant …) »_ : le code a expiré ou a
+- _« Bosch a refusé la connexion (invalid_grant …) »_ : le code a expiré ou a
   déjà servi : recommencez.
+- _« Cette adresse a été tronquée par la console »_ : copiez-la par un clic
+  droit, **Copier l'adresse du lien**, ou depuis l'onglet Réseau (voir
+  l'étape 3).
+- _« Bosch est injoignable »_ : recollez la même adresse dans les minutes
+  qui suivent.
 - _« La passerelle du cloud Indego refuse les appels »_ (HTTP 403) : la
   passerelle Azure devant l'API bloque certaines requêtes ; l'intégration
   réessaie toute seule.
 - Les logs ne contiennent jamais de jeton, de code ni de mot de passe.
-  Passez `LOG_LEVEL=debug` pour plus de détails.
 
 ## Crédits
 

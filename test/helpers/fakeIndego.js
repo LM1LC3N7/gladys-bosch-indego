@@ -95,6 +95,7 @@ export function installIndego({ clock, ...overrides } = {}) {
       method,
       headers: init.headers ?? {},
       body,
+      signal: init.signal,
     };
     calls.push(call);
     for (const [part, ms] of state.slow) {

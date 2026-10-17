@@ -64,6 +64,12 @@ async function setup({ config = SIGNED_IN, create = true, overrides } = {}) {
 
 const state = (gladys, device, key) => gladys.fake.lastState(`${device}:${key}`);
 const feature = (device, key) => ({ external_id: `${device}:${key}` });
+const mow = (ctx) =>
+  ctx.gladys.fake.setValue({ external_id: DEVICE }, feature(DEVICE, 'run_mode'), RUN_MODE.CLEANING);
+const pause = (ctx) =>
+  ctx.gladys.fake.setValue({ external_id: DEVICE }, feature(DEVICE, 'run_mode'), RUN_MODE.IDLE);
+const dock = (ctx) => ctx.gladys.fake.setValue({ external_id: DEVICE }, feature(DEVICE, 'dock'), 1);
+const readBacks = (ctx) => ctx.timers.timeouts().filter((t) => READ_BACK.includes(t.ms));
 const tick = async (ctx, ms = 30_000) => {
   ctx.clock.now += ms;
   await ctx.timers.runIntervals();
@@ -92,9 +98,11 @@ test('not signed in: a status that says what to do, and no call to Bosch', async
 });
 
 test('the start action, then the pasted console line: signed in, token kept, mowers found', async () => {
-  const { gladys, logs } = await setup({ config: {}, create: false });
+  const { gladys, logs, app } = await setup({ config: {}, create: false });
   const started = message(await gladys.fake.action(ACTIONS.START, {}));
-  assert.match(started.en, /F12/);
+  assert.match(started.en, /F12, or Cmd\+Option\+I on a Mac/);
+  assert.match(started.en, /Preserve log/);
+  assert.match(started.fr, /Conserver le journal/);
   assert.match(started.fr, /outils de développement/);
   const url = /https:\/\/prodindego\.b2clogin\.com\/\S+/.exec(started.en)[0];
   assert.equal(/https:\/\/\S+/.exec(started.fr)[0], url, 'the same address in both languages');
@@ -103,7 +111,10 @@ test('the start action, then the pasted console line: signed in, token kept, mow
 
   const ack = await gladys.fake.action(ACTIONS.FINISH, { url: consoleLine(stateParam, code) });
   assert.equal(ack.success, true);
-  assert.match(message(ack).en, /^Signed in: 2 mowers found/);
+  // The action answers at once; the mowers are read in the background.
+  assert.match(message(ack).en, /^Signed in\. The mowers are being read/);
+  await app.starting;
+  await settle();
   const stored = gladys.fake.config[TOKEN_KEY];
   assert.equal(stored.refresh_token, TOKEN.refresh_token);
   assert.equal(stored.access_token, TOKEN.access_token);
@@ -137,12 +148,49 @@ test('the Connect button gives the same kind of address; bad pastes are explaine
     message(await gladys.fake.action(ACTIONS.FINISH, { url: consoleLine('other', 'c') })).en,
     /does not belong to a sign-in/,
   );
-  assert.match(
-    message(await gladys.fake.action(ACTIONS.FINISH, { url: consoleLine(stateParam, 'bad') })).en,
-    /^Bosch refused the sign-in \(invalid_grant: AADB2C90080[^)]*\)\. The code serves once/,
+  const refused = message(
+    await gladys.fake.action(ACTIONS.FINISH, { url: consoleLine(stateParam, 'bad') }),
   );
+  assert.match(
+    refused.en,
+    /^Bosch refused the sign-in \(invalid_grant: AADB2C90080[^)]*\): the code serves once.*start again at step 1\.$/,
+  );
+  assert.match(refused.fr, /^Bosch a refusé la connexion \(invalid_grant: AADB2C90080/);
+  assert.doesNotMatch(refused.fr, /refused the sign-in/, 'no English prefix in French');
+  assert.match(refused.fr, /recommencez à l'étape 1\.$/);
+  const cut = message(
+    await gladys.fake.action(ACTIONS.FINISH, {
+      url: 'com.bosch.indegoconnect://login?state=abc&code=eyJraWQiOiJjcGlt…',
+    }),
+  );
+  assert.match(cut.en, /cut short by the console/);
+  assert.match(cut.fr, /Copier l'adresse du lien/);
+  const cancelled = message(
+    await gladys.fake.action(ACTIONS.FINISH, {
+      url: 'com.bosch.indegoconnect://login?error=access_denied&error_description=AADB2C90091%3a+The+user+has+cancelled+entering+self-asserted+information.&state=x',
+    }),
+  );
+  assert.equal(cancelled.en, 'The sign-in was cancelled on the Bosch page: start again at step 1.');
+  assert.match(cancelled.fr, /^La connexion a été annulée/);
   assert.equal(gladys.fake.config[TOKEN_KEY], undefined);
   assert.equal(fake.api().length, 0);
+});
+
+test('Bosch unreachable while finishing: an honest message, and the same paste works again', async () => {
+  const { gladys, app } = await setup({ config: {}, create: false });
+  const started = message(await gladys.fake.action(ACTIONS.START, {}));
+  const url = /https:\/\/\S+/.exec(started.en)[0];
+  const paste = consoleLine(new URL(url).searchParams.get('state'), fake.issueCode(url));
+  fake.state.fail.set('/oauth2/v2.0/token', new TypeError('fetch failed'));
+  const failed = message(await gladys.fake.action(ACTIONS.FINISH, { url: paste }));
+  assert.match(failed.fr, /^Bosch est injoignable \(fetch failed\) : recollez la même adresse/);
+  assert.doesNotMatch(failed.fr, /nouvel essai prévu/);
+  fake.state.fail.clear();
+  const again = message(await gladys.fake.action(ACTIONS.FINISH, { url: paste }));
+  assert.match(again.en, /^Signed in\./);
+  await app.starting;
+  await settle();
+  assert.equal(gladys.fake.discoveredDevices.length, 2);
 });
 
 // --- Reading -------------------------------------------------------------------------
@@ -283,21 +331,30 @@ test('mow: the state is read first, then the command, then read back', async () 
   assert.equal(state(ctx.gladys, DEVICE, 'state'), DOCK_STATE.RUNNING);
 });
 
-test('a command that changes nothing is not sent; dock and pause map to their commands', async () => {
+test('a stop is always sent; only a start while mowing is skipped', async () => {
   const ctx = await setup();
-  const dock = await ctx.gladys.fake.setValue({ external_id: DEVICE }, feature(DEVICE, 'dock'), 1);
-  assert.equal(dock.success, true);
-  assert.deepEqual(fake.state.commands, [], 'already in the station');
-  fake.state.states.set(PELOUSE, fixture('state-mowing.json'));
-  await ctx.gladys.fake.setValue(
-    { external_id: DEVICE },
-    feature(DEVICE, 'run_mode'),
-    RUN_MODE.IDLE,
-  );
-  await ctx.gladys.fake.setValue({ external_id: DEVICE }, feature(DEVICE, 'dock'), 1);
+  // Docked: dock and pause are sent all the same (the cloud state can lag).
+  await dock(ctx);
+  await pause(ctx);
   assert.deepEqual(
     fake.state.commands.map((c) => c.command),
-    ['pause', 'returnToDock'],
+    ['returnToDock', 'pause'],
+  );
+  // Mowing, once the guard of the last command is over: a start changes nothing.
+  ctx.clock.now += 91_000;
+  fake.state.states.set(PELOUSE, fixture('state-mowing.json'));
+  const ack = await mow(ctx);
+  assert.equal(ack.success, true);
+  assert.deepEqual(
+    fake.state.commands.map((c) => c.command),
+    ['returnToDock', 'pause'],
+    'already mowing: not sent',
+  );
+  await pause(ctx);
+  await dock(ctx);
+  assert.deepEqual(
+    fake.state.commands.map((c) => c.command),
+    ['returnToDock', 'pause', 'pause', 'returnToDock'],
   );
   const bad = await ctx.gladys.fake.setValue(
     { external_id: DEVICE },
@@ -360,6 +417,187 @@ test('commands to one mower run one after the other', async () => {
       .map((c) => c.method),
     ['GET', 'PUT', 'GET', 'PUT'],
   );
+});
+
+test('mow and dock at once on a docked mower whose state lags: both are sent', async () => {
+  const ctx = await setup();
+  const [a, b] = await Promise.all([mow(ctx), dock(ctx)]);
+  assert.equal(a.success && b.success, true);
+  assert.deepEqual(
+    fake.state.commands.map((c) => c.command),
+    ['mow', 'returnToDock'],
+  );
+});
+
+test('mow, then pause 3 s later while the cloud still says docked: the pause is sent', async () => {
+  const ctx = await setup();
+  await mow(ctx);
+  ctx.clock.now += 3_000;
+  const p = await pause(ctx);
+  assert.equal(p.success, true);
+  assert.deepEqual(
+    fake.state.commands.map((c) => c.command),
+    ['mow', 'pause'],
+  );
+});
+
+test('the guard: a start is not skipped right after a stop, until the stop shows', async () => {
+  const ctx = await setup();
+  fake.state.states.set(PELOUSE, fixture('state-mowing.json'));
+  await pause(ctx);
+  // The cloud still says mowing: the guard of the pause stands, the start is sent.
+  await mow(ctx);
+  assert.deepEqual(
+    fake.state.commands.map((c) => c.command),
+    ['pause', 'mow'],
+  );
+  // The mower was seen paused, then mowing: the guard of the start is lifted.
+  fake.state.states.set(PELOUSE, { state: 517 });
+  await ctx.timers.runTimeouts((t) => t.ms === READ_BACK[0]);
+  fake.state.states.set(PELOUSE, fixture('state-mowing.json'));
+  await ctx.timers.runTimeouts((t) => t.ms === READ_BACK[1]);
+  await settle();
+  assert.equal(ctx.app.guards.has(PELOUSE), false);
+  await mow(ctx);
+  assert.equal(fake.state.commands.length, 2, 'already mowing, no guard: skipped');
+});
+
+test('a slow cloud and two commands at once: the second is refused, never sent late', async () => {
+  const ctx = await setup();
+  fake.state.slow.set(`alms/${PELOUSE}/state`, 2_000);
+  const [a, b] = await Promise.all([mow(ctx), pause(ctx)]);
+  assert.equal(a.success, true);
+  assert.equal(b.success, false);
+  assert.match(b.error, /NOT sent/);
+  assert.deepEqual(
+    fake.state.commands.map((c) => c.command),
+    ['mow'],
+  );
+});
+
+test('a command whose answer does not come in time: said sent, read back kept', async () => {
+  const ctx = await setup();
+  let answer;
+  fake.state.fail.set(`alms/${PELOUSE}/state`, (call) => {
+    if (call.method === 'PUT') {
+      fake.state.commands.push({ serial: PELOUSE, command: call.body.state });
+      return new Promise((resolve) => {
+        answer = resolve;
+      });
+    }
+    return json(fake.state.states.get(PELOUSE));
+  });
+  const pending = mow(ctx);
+  await settle();
+  // The deadline of the ack (3.5 s from the command) passes.
+  await ctx.timers.runTimeouts((t) => t.ms > 0 && t.ms <= ACK_BUDGET);
+  const ack = await pending;
+  assert.equal(ack.success, false);
+  assert.equal(
+    ack.error,
+    'Indego: command sent, but not confirmed in time; the state will be read again in 10 s.',
+  );
+  assert.equal(fake.state.commands.length, 1, 'the request was never cut');
+  assert.equal(readBacks(ctx).length, 2);
+  answer(new Response(null, { status: 200 }));
+  await settle();
+  assert.ok(ctx.logs.some((l) => /confirmed late/.test(l)));
+});
+
+test('a command that failed on the way (timeout, network): said maybe sent, read back', async () => {
+  const ctx = await setup();
+  fake.state.fail.set(`alms/${PELOUSE}/state`, (call) => {
+    if (call.method === 'PUT') {
+      fake.state.commands.push({ serial: PELOUSE, command: call.body.state });
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    }
+    return json(fake.state.states.get(PELOUSE));
+  });
+  const ack = await mow(ctx);
+  assert.equal(ack.success, false);
+  assert.match(ack.error, /command sent, but not confirmed in time/);
+  assert.equal(readBacks(ctx).length, 2);
+});
+
+test('command errors follow the configured language', async () => {
+  const ctx = await setup({ config: { ...SIGNED_IN, language: 'fr' } });
+  fake.state.states.set(PELOUSE, { state: 99999 });
+  const ack = await dock(ctx);
+  assert.equal(ack.error, "Indego : la tondeuse est hors ligne, la commande n'a PAS été envoyée.");
+});
+
+test('read backs that fail: logged, a 429 pauses, a refused session stops', async () => {
+  const ctx = await setup();
+  await mow(ctx);
+  fake.state.fail.set(`alms/${PELOUSE}/state`, json({ message: 'down' }, 503));
+  await ctx.timers.runTimeouts((t) => READ_BACK.includes(t.ms));
+  await settle();
+  assert.ok(ctx.logs.some((l) => /Read back of 603100001 failed: HTTP 503/.test(l)));
+  assert.equal(ctx.gladys.fake.connectionStatus.connected, true);
+
+  fake.state.fail.clear();
+  ctx.clock.now += 60_000;
+  await mow(ctx);
+  fake.state.fail.set(
+    `alms/${PELOUSE}/state`,
+    json({ message: 'slow' }, 429, { 'retry-after': '120' }),
+  );
+  await ctx.timers.runTimeouts((t) => READ_BACK.includes(t.ms));
+  await settle();
+  assert.equal(ctx.app.pausedUntil - ctx.clock.now, 120_000);
+
+  ctx.clock.now += 11 * MINUTE;
+  fake.state.fail.clear();
+  assert.equal((await mow(ctx)).success, true);
+  fake.state.valid.clear();
+  fake.state.refreshTokens.clear();
+  await ctx.timers.runTimeouts((t) => READ_BACK.includes(t.ms));
+  await settle();
+  assert.equal(ctx.app.fatal?.code, 'refused');
+  assert.equal(ctx.timers.pending.size, 0);
+  assert.equal(fake.to('/token').length, 1, 'one renewal, refused, never again');
+});
+
+test('a secondary read that fails never blocks the state', async () => {
+  const ctx = await setup();
+  fake.state.fail.set('nextcutting', json({ message: 'down' }, 503));
+  fake.state.fail.set('operatingData', new TypeError('fetch failed'));
+  fake.state.longpoll.set(PELOUSE, fixture('state-mowing.json'));
+  fake.state.states.set(PELOUSE, fixture('state-mowing.json'));
+  await runLongpolls(ctx);
+  await tick(ctx, 10 * MINUTE);
+  assert.equal(ctx.gladys.fake.connectionStatus.connected, true);
+  assert.equal(state(ctx.gladys, DEVICE, 'state'), DOCK_STATE.RUNNING);
+  assert.ok(ctx.logs.some((l) => /^Next mowing of 603100001: HTTP 503/.test(l)));
+  assert.ok(ctx.logs.some((l) => /^Battery of 603100001: fetch failed/.test(l)));
+  // Each one waits its own back-off.
+  const before = fake.to('nextcutting').length;
+  await tick(ctx, 10_000);
+  assert.equal(fake.to('nextcutting').length, before, 'not before its own retry time');
+  fake.state.fail.clear();
+  await tick(ctx, 25_000);
+  assert.equal(state(ctx.gladys, DEVICE, 'next_mow'), '2026-10-18 10:00');
+});
+
+test('stopping cancels the pending long polls', async () => {
+  const ctx = await setup();
+  const signals = [];
+  fake.state.fail.set('longpoll=true', (call) => {
+    signals.push(call.signal);
+    return new Promise((_, reject) =>
+      call.signal.addEventListener('abort', () => reject(call.signal.reason)),
+    );
+  });
+  const runs = longpolls(ctx).map((t) => {
+    ctx.timers.pending.delete(t.id);
+    return t.fn();
+  });
+  await settle();
+  assert.equal(signals.length, 2);
+  ctx.app.stop();
+  await Promise.all(runs);
+  assert.ok(signals.every((s) => s.aborted));
+  assert.equal(longpolls(ctx).length, 0, 'no new long poll after a stop');
 });
 
 // --- Failures --------------------------------------------------------------------------
@@ -428,6 +666,8 @@ test('a refused refresh token: everything stops until a new sign-in', async () =
     url: `com.bosch.indegoconnect://login?state=${new URL(url).searchParams.get('state')}&code=${fake.issueCode(url)}`,
   });
   assert.match(message(done).en, /^Signed in/);
+  await ctx.app.starting;
+  await settle();
   assert.equal(ctx.gladys.fake.connectionStatus.connected, true);
   assert.equal(ctx.gladys.fake.config[TOKEN_KEY].refresh_token, RENEWED.refresh_token);
 });

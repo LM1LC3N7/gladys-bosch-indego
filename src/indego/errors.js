@@ -18,12 +18,19 @@ import { HttpError } from '../http.js';
  * - command: a command refused before it was sent (state unknown, too slow...)
  */
 export class IndegoError extends Error {
-  constructor(code, message, { status, retryAfter } = {}) {
+  /**
+   * `detail`: what Bosch said, for the user texts (no prefix of ours);
+   * `kind`: a finer cause (sign_in: no_code | truncated | unknown_sign_in;
+   * refused: cancelled).
+   */
+  constructor(code, message, { status, retryAfter, detail, kind } = {}) {
     super(message);
     this.name = 'IndegoError';
     this.code = code;
     this.status = status;
     this.retryAfter = retryAfter;
+    this.detail = detail ?? message;
+    this.kind = kind;
   }
 }
 

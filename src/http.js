@@ -74,13 +74,15 @@ async function readBounded(response, max) {
  */
 export async function request(
   url,
-  { method = 'GET', headers = {}, body, form = false, timeout = HTTP_TIMEOUT } = {},
+  { method = 'GET', headers = {}, body, form = false, timeout = HTTP_TIMEOUT, signal } = {},
 ) {
+  const deadline = AbortSignal.timeout(Math.max(1, Math.round(timeout)));
   const init = {
     method,
     headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', ...headers },
     redirect: 'error',
-    signal: AbortSignal.timeout(Math.max(1, Math.round(timeout))),
+    // `signal`: the caller can cancel too (a long poll when the app stops).
+    signal: signal ? AbortSignal.any([deadline, signal]) : deadline,
   };
   if (body !== undefined) {
     init.headers['Content-Type'] = form ? 'application/x-www-form-urlencoded' : 'application/json';

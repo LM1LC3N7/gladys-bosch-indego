@@ -26,7 +26,7 @@ export class IndegoClient {
   /** One API call: the data, or null for "no content" (204, a long poll without change). */
   async call(
     path,
-    { method = 'GET', body, timeout = HTTP_TIMEOUT, longpoll = false, renew = true } = {},
+    { method = 'GET', body, timeout = HTTP_TIMEOUT, longpoll = false, renew = true, signal } = {},
   ) {
     const send = async () => {
       const token = await this.auth.accessToken({ renew });
@@ -34,6 +34,7 @@ export class IndegoClient {
         method,
         body,
         timeout,
+        signal,
         headers: { Authorization: `Bearer ${token}` },
       });
       return answer.status === 204 || answer.data === undefined ? null : answer.data;
@@ -119,14 +120,15 @@ export class IndegoClient {
    * The state. `longpoll`: held by the cloud until the state code differs
    * from `last` (null: no change within LONGPOLL_SECONDS).
    */
-  state(serial, { longpoll = false, last = 0, timeout = HTTP_TIMEOUT, renew = true } = {}) {
+  state(serial, { longpoll = false, last = 0, timeout = HTTP_TIMEOUT, renew = true, signal } = {}) {
     if (!longpoll) {
-      return this.call(PATHS.state(serial), { timeout, renew });
+      return this.call(PATHS.state(serial), { timeout, renew, signal });
     }
     const query = `?longpoll=true&timeout=${LONGPOLL_SECONDS}&last=${Number(last) || 0}`;
     return this.call(`${PATHS.state(serial)}${query}`, {
       longpoll: true,
       timeout: (LONGPOLL_SECONDS + 20) * 1000,
+      signal,
     });
   }
 
@@ -155,7 +157,7 @@ export class IndegoClient {
   }
 
   /** A command (mow | pause | returnToDock), with the current token only. */
-  command(serial, command, { timeout }) {
+  command(serial, command, { timeout = HTTP_TIMEOUT } = {}) {
     return this.call(PATHS.state(serial), {
       method: 'PUT',
       body: { state: command },

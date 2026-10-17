@@ -117,9 +117,28 @@ up to date at the end of every milestone.
 - **Commands**: one at a time per mower (a queue); the 3.5 s budget starts
   when Gladys sends the command, queue included; the state is read with the
   budget minus 1.2 s; the command is not sent when less than 1.2 s remain,
-  when the state cannot be read, when the mower is offline (99999), or when
-  it would change nothing; the command never renews the token (no time):
-  an expired token refuses it.
+  when the state cannot be read or when the mower is offline (99999); the
+  command never renews the token (no time): an expired token refuses it.
+  After review (2026-10-17): a stop (pause, returnToDock) is never skipped;
+  a start is skipped only while mowing and when no guard stands. The guard
+  ({command, at, startCode}) is set on every PUT sent, even unanswered, and
+  lifted by the expected state seen after a move, or after 90 s. The PUT
+  keeps its full 20 s timeout and races the deadline: a late answer is
+  reported "sent, not confirmed", the read backs stay.
+- **Sign-in after review**: a pasted text with "…" or "..." is refused as cut
+  by the console; any address must be `com.bosch.indegoconnect://login`
+  (or its encoded form, decoded once); a bare code must look like a B2C code
+  (`eyJ…`, ≤ 4096 characters). A sign-in without a refresh token is refused;
+  a renewal running when a sign-in finishes is dropped (epoch counter). A
+  network failure during the exchange keeps the sign-in: the same address
+  can be pasted again. The finish and test actions answer at once and start
+  in the background.
+- **`account_link`** is known by the Gladys core since v5.0.0 (manifest
+  schema, front `config-page` opens the address in a new tab with
+  noreferrer; checked in the core tags on 2026-10-17): `gladys_version`
+  `>=5.1.0` (needed by `scene_triggers`) covers it.
+- **Secondary reads** (details, battery, next mowing, alerts) never fail the
+  round: each has its own back-off; only a 429 or a refused session goes up.
 - **Long poll on by default** (the Home Assistant integration's way):
   fewer requests than plain polling and a live state; a switch turns it off.
 - **Alerts trigger**: only alerts that appear after the first read and are

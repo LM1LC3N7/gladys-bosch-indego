@@ -53,31 +53,49 @@ export function parseRedirect(input) {
   if (!text) {
     return null;
   }
-  if (/indegoconnect%3a/i.test(text)) {
+  // The console shortens long addresses with an ellipsis: the code is cut.
+  if (text.includes('…') || text.includes('...')) {
+    return { truncated: true, code: null, state: null, error: null };
+  }
+  const SCHEME = 'com.bosch.indegoconnect://login';
+  const encoded = /com\.bosch\.indegoconnect%3a%2f%2flogin/i.exec(text);
+  if (encoded && !text.toLowerCase().includes(SCHEME)) {
+    // The form found in the HTML of the last page: decoded once, the rest of it only.
+    const end = text.slice(encoded.index).search(/[\s'"<>]/);
     try {
-      text = decodeURIComponent(text);
+      text = decodeURIComponent(
+        text.slice(encoded.index, end === -1 ? undefined : encoded.index + end),
+      );
     } catch {
       return null;
     }
   }
   text = text.replace(/&amp;/g, '&');
-  if (/^(?:code|state|error)=/.test(text)) {
+  let query;
+  if (/:\/\//.test(text)) {
+    // An address is there: only the app's redirect is accepted.
+    const at = text.toLowerCase().indexOf(SCHEME);
+    if (at === -1) {
+      return null;
+    }
+    const rest = text.slice(at + SCHEME.length).split(/[\s'"<>]/)[0];
+    if (!/^[?#]/.test(rest)) {
+      return null;
+    }
+    query = rest.slice(1);
+  } else if (/^[?#]?(?:code|state|error)=/.test(text)) {
     // Only the query string was copied.
-    text = `?${text}`;
+    query = text.replace(/^[?#]/, '').split(/[\s'"<>]/)[0];
+  } else {
+    // A bare authorization code (Azure AD B2C codes are long base64url JWEs).
+    return text.length <= 4096 && /^eyJ[A-Za-z0-9._~-]*$/.test(text)
+      ? { code: text, state: null, error: null, errorDescription: null }
+      : null;
   }
-  const at = text.search(/[?&#](?:code|error)=/);
-  if (at === -1) {
-    // A bare authorization code (long, URL-safe).
-    return /^[A-Za-z0-9._~-]{20,}$/.test(text) ? { code: text, state: null, error: null } : null;
-  }
-  const start = text.lastIndexOf('?', at) === -1 ? at : text.lastIndexOf('?', at);
-  const query = text
-    .slice(start + 1)
-    .split(/[\s'"<>]/)[0]
-    .replace(/#/g, '&');
-  const params = new URLSearchParams(query);
+  const params = new URLSearchParams(query.replace(/#/g, '&'));
+  const code = params.get('code') || null;
   const result = {
-    code: params.get('code') || null,
+    code: code && code.length <= 4096 ? code : null,
     state: params.get('state') || null,
     error: params.get('error') || null,
     errorDescription: params.get('error_description') || null,
@@ -146,6 +164,8 @@ export class IndegoAuth {
     /** Set when Bosch refused the refresh token: a new sign-in is needed. */
     this.refused = false;
     this.renewing = undefined;
+    /** Moved on by every sign-in: a renewal started before it is stale. */
+    this.epoch = 0;
     /** Failed renewals in a row (network), when to try again, and why it failed. */
     this.failures = 0;
     this.retryAt = 0;
@@ -196,52 +216,80 @@ export class IndegoAuth {
     return url.toString();
   }
 
-  /** The verifier of a pasted state (or of the newest sign-in when the address has none). It serves once. */
-  takeVerifier(state) {
+  /** The sign-in of a pasted state (or the newest one when the address has none). It serves once. */
+  takeSignIn(state) {
     const now = this.now();
-    let key = state;
-    if (!key) {
-      key = [...this.pending.keys()].at(-1);
-    }
+    const key = state || [...this.pending.keys()].at(-1);
     const entry = key ? this.pending.get(key) : undefined;
     if (!entry) {
       return null;
     }
     this.pending.delete(key);
-    return now - entry.at <= SIGN_IN_TTL ? entry.verifier : null;
+    return now - entry.at <= SIGN_IN_TTL ? { key, entry } : null;
   }
 
   /** The address the sign-in ended on (pasted) -> a new token, stored. */
   async finishSignIn(text, { timeout = HTTP_TIMEOUT } = {}) {
     const parsed = parseRedirect(text);
     if (!parsed) {
-      throw new IndegoError('sign_in', 'no authorization code in the pasted text');
+      throw new IndegoError('sign_in', 'no authorization code in the pasted text', {
+        kind: 'no_code',
+      });
+    }
+    if (parsed.truncated) {
+      throw new IndegoError('sign_in', 'the address was cut short by the console', {
+        kind: 'truncated',
+      });
     }
     if (parsed.error) {
-      const detail = String(parsed.errorDescription ?? '')
-        .replace(/\s+/g, ' ')
-        .slice(0, 120);
-      throw new IndegoError(
-        'refused',
-        `Bosch refused the sign-in (${parsed.error}${detail ? `: ${detail}` : ''})`,
-      );
+      const detail = `${parsed.error}${
+        parsed.errorDescription
+          ? `: ${String(parsed.errorDescription).replace(/\s+/g, ' ').slice(0, 120)}`
+          : ''
+      }`;
+      // AADB2C90091: the user clicked Cancel on the Bosch page.
+      const cancelled =
+        parsed.error === 'access_denied' || /AADB2C90091/.test(parsed.errorDescription ?? '');
+      throw new IndegoError('refused', `Bosch refused the sign-in (${detail})`, {
+        detail,
+        kind: cancelled ? 'cancelled' : undefined,
+      });
     }
-    const verifier = this.takeVerifier(parsed.state);
-    if (!verifier) {
+    const signIn = this.takeSignIn(parsed.state);
+    if (!signIn) {
       throw new IndegoError(
         'sign_in',
         'this address does not belong to a sign-in started in the last 15 minutes',
+        { kind: 'unknown_sign_in' },
       );
     }
-    const token = await this.tokenRequest(
-      {
-        grant_type: 'authorization_code',
-        code: parsed.code,
-        redirect_uri: OAUTH.REDIRECT_URI,
-        code_verifier: verifier,
-      },
-      timeout,
-    );
+    let token;
+    try {
+      token = await this.tokenRequest(
+        {
+          grant_type: 'authorization_code',
+          code: parsed.code,
+          redirect_uri: OAUTH.REDIRECT_URI,
+          code_verifier: signIn.entry.verifier,
+        },
+        timeout,
+      );
+    } catch (err) {
+      if (err.code !== 'refused') {
+        // Bosch was not reached: the same address can be pasted again.
+        this.pending.set(signIn.key, signIn.entry);
+      }
+      throw err;
+    }
+    if (!token.refreshToken) {
+      throw new IndegoError(
+        'refused',
+        'Bosch refused the sign-in (no renewal token in the answer)',
+        { detail: 'no renewal token in the answer' },
+      );
+    }
+    // A renewal still running with the previous session must not overwrite this one.
+    this.epoch += 1;
     await this.accept(token, 'sign_in');
     return token;
   }
@@ -269,25 +317,28 @@ export class IndegoAuth {
         const detail = String(err.body?.error_description ?? '')
           .split(/\r?\n/)[0]
           .slice(0, 120);
-        throw new IndegoError(
-          'refused',
-          `Bosch refused the sign-in (${reason}${detail ? `: ${detail}` : ''})`,
-          { status: err.status },
-        );
+        const said = `${reason}${detail ? `: ${detail}` : ''}`;
+        throw new IndegoError('refused', `Bosch refused the sign-in (${said})`, {
+          status: err.status,
+          detail: said,
+        });
       }
       throw new IndegoError('unreachable', reasonOf(err), { status: err?.status });
     }
     const token = tokenOf(response.data, this.now());
     if (!token) {
-      throw new IndegoError('refused', 'Bosch refused the sign-in (no access token)');
+      throw new IndegoError('refused', 'Bosch refused the sign-in (no access token)', {
+        detail: 'no access token',
+      });
     }
     return token;
   }
 
   /** Keep a new token and hand it to `onToken` (to store it); `reason`: sign_in | renew. */
   async accept(token, reason) {
-    // A refresh answer may come without a new refresh token: keep the old one.
-    if (!token.refreshToken && this.token?.refreshToken) {
+    // A refresh answer may come without a new refresh token: keep the old
+    // one (only on a renewal: a sign-in brings its own).
+    if (reason === 'renew' && !token.refreshToken && this.token?.refreshToken) {
       token.refreshToken = this.token.refreshToken;
       token.refreshExpiresAt = this.token.refreshExpiresAt;
     }
@@ -313,14 +364,23 @@ export class IndegoAuth {
     if (!this.token?.refreshToken) {
       throw new IndegoError('no_token', 'Not signed in to Bosch');
     }
+    // A sign-in finished while this renewal ran: its answer (or refusal)
+    // belongs to the old session and is dropped.
+    const epoch = this.epoch;
     try {
       const token = await this.tokenRequest(
         { grant_type: 'refresh_token', refresh_token: this.token.refreshToken },
         HTTP_TIMEOUT,
       );
+      if (epoch !== this.epoch) {
+        return this.token;
+      }
       await this.accept(token, 'renew');
       return token;
     } catch (err) {
+      if (epoch !== this.epoch) {
+        return this.token;
+      }
       if (err.code === 'refused') {
         // Never tried again by itself: only a new sign-in clears it.
         this.refused = true;

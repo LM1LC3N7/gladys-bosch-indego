@@ -86,7 +86,13 @@ test('the token is kept in clear: no text claims it is encrypted', () => {
     assert.doesNotMatch(read(file), /\bencrypt|\bchiffr/i, file);
   }
   for (const lang of ['en', 'fr']) {
-    assert.match(read(`docs/${lang}.md`), /in clear|en clair/);
+    const doc = read(`docs/${lang}.md`);
+    assert.match(doc, /in clear|en clair/);
+    assert.match(doc, /Cmd\+Option\+I/);
+    assert.match(doc, /Preserve log|Conserver le journal/);
+    assert.match(doc, /Copy link address|Copier l'adresse du lien/);
+    assert.match(doc, /90 days|90 jours/);
+    assert.doesNotMatch(doc, /LOG_LEVEL/);
   }
 });
 

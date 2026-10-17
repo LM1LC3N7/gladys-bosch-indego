@@ -93,6 +93,11 @@ export const ACK_BUDGET = 3_500;
 export const SEND_RESERVE = 1_200;
 /** The state is read back that long after a command. */
 export const READ_BACK = [10_000, 45_000];
+/**
+ * After a command is sent, a different command is never skipped for that
+ * long, unless the expected state was seen after a move.
+ */
+export const GUARD_TTL = 90_000;
 
 // --- Gladys ------------------------------------------------------------------------
 

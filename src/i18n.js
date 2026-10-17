@@ -147,30 +147,42 @@ export const T = {
   // --- Sign-in actions ------------------------------------------------------------
   signInStarted: (url) =>
     both(
-      `Open this address in a browser, open its developer tools (F12, Console tab) and sign in. The browser then fails to open "com.bosch.indegoconnect://login?…": copy that address (or the whole error line) into "Finish the sign-in", within 15 minutes. ${url}`,
-      `Ouvrez cette adresse dans un navigateur, ouvrez ses outils de développement (F12, onglet Console) et connectez-vous. Le navigateur n'arrive pas ensuite à ouvrir « com.bosch.indegoconnect://login?… » : copiez cette adresse (ou toute la ligne d'erreur) dans « Terminer la connexion », dans les 15 minutes. ${url}`,
+      `Open this address in a new browser tab on a computer. Before typing your e-mail, open the developer tools (F12, or Cmd+Option+I on a Mac), Console tab, and tick "Preserve log". Sign in: the browser then fails to open "com.bosch.indegoconnect://login?…". Right-click that address in the console, choose "Copy link address", and paste it into "Finish the sign-in" within 15 minutes (the Network tab, request "authresp", header Location, works too). ${url}`,
+      `Ouvrez cette adresse dans un nouvel onglet, sur un ordinateur. Avant de saisir votre e-mail, ouvrez les outils de développement (F12, ou Cmd+Option+I sur Mac), onglet Console, et cochez « Conserver le journal ». Connectez-vous : le navigateur n'arrive pas ensuite à ouvrir « com.bosch.indegoconnect://login?… ». Faites un clic droit sur cette adresse dans la console, choisissez « Copier l'adresse du lien », et collez-la dans « Terminer la connexion » dans les 15 minutes (l'onglet Réseau, requête « authresp », en-tête Location, marche aussi). ${url}`,
     ),
   noCode: both(
     'No sign-in code in the pasted text: paste the address starting with com.bosch.indegoconnect://login?, with its state and code.',
     "Aucun code de connexion dans le texte collé : collez l'adresse qui commence par com.bosch.indegoconnect://login?, avec son state et son code.",
   ),
+  truncated: both(
+    'This address was cut short by the console (it contains "…"): right-click the address in the console and choose "Copy link address", or copy the Location header of the "authresp" request in the Network tab.',
+    "Cette adresse a été tronquée par la console (elle contient « … ») : faites un clic droit sur l'adresse dans la console et choisissez « Copier l'adresse du lien », ou copiez l'en-tête Location de la requête « authresp » dans l'onglet Réseau.",
+  ),
   unknownSignIn: both(
     'This address does not belong to a sign-in started in the last 15 minutes: click "Start the sign-in" again and use the new address.',
     'Cette adresse ne correspond à aucune connexion démarrée dans les 15 dernières minutes : cliquez à nouveau sur « Démarrer la connexion » et utilisez la nouvelle adresse.',
   ),
-  codeRefused: (reason) =>
+  signInCancelled: both(
+    'The sign-in was cancelled on the Bosch page: start again at step 1.',
+    "La connexion a été annulée sur la page de Bosch : recommencez à l'étape 1.",
+  ),
+  signInFailed: (reason) =>
     both(
-      `${reason}. The code serves once and expires within minutes: start the sign-in again.`,
-      `Connexion refusée par Bosch (${reason}). Le code ne sert qu'une fois et expire en quelques minutes : recommencez la connexion.`,
+      `Bosch refused the sign-in (${reason}): the code serves once and expires within minutes, start again at step 1.`,
+      `Bosch a refusé la connexion (${reason}) : le code ne sert qu'une fois et expire en quelques minutes, recommencez à l'étape 1.`,
     ),
-  signedIn: (count) =>
+  signInUnreachable: (reason) =>
     both(
-      `Signed in: ${count} mower${count > 1 ? 's' : ''} found. Add ${count > 1 ? 'them' : 'it'} in the Discovery tab.`,
-      `Connecté : ${count} tondeuse${count > 1 ? 's' : ''} trouvée${count > 1 ? 's' : ''}. Ajoutez-la${count > 1 ? 's' : ''} dans l'onglet Découverte.`,
+      `Bosch could not be reached (${reason}): paste the same address again within a few minutes, or start again at step 1.`,
+      `Bosch est injoignable (${reason}) : recollez la même adresse dans les minutes qui suivent, ou recommencez à l'étape 1.`,
     ),
-  signedInNoList: both(
-    'Signed in; the mowers could not be read yet (see the connection status).',
-    "Connecté ; les tondeuses n'ont pas encore pu être lues (voir l'état de la connexion).",
+  signedInStarting: both(
+    'Signed in. The mowers are being read: they appear in the Discovery tab within a minute (see the connection status).',
+    "Connecté. Les tondeuses sont en cours de lecture : elles apparaissent dans l'onglet Découverte d'ici une minute (voir l'état de la connexion).",
+  ),
+  starting: both(
+    'Starting: the mowers are being read. Look at the connection status in a minute, then test again.',
+    "Démarrage : les tondeuses sont en cours de lecture. Regardez l'état de la connexion d'ici une minute, puis testez à nouveau.",
   ),
 
   // --- Test action ----------------------------------------------------------------
@@ -193,14 +205,49 @@ export const T = {
     );
   },
 
-  // --- Commands (thrown: Gladys shows the message of a failed command) ----------
-  commandTooSlow:
+  // --- Commands (thrown, in the configured language: Gladys shows the message) ---
+  notSignedInCommand: both(
+    'Indego: not signed in to Bosch, the command was NOT sent.',
+    "Indego : pas de connexion à Bosch, la commande n'a PAS été envoyée.",
+  ),
+  refusedCommand: both(
+    'Indego: the Bosch session expired, the command was NOT sent; sign in again.',
+    "Indego : la session Bosch a expiré, la commande n'a PAS été envoyée ; reconnectez-vous.",
+  ),
+  commandTooSlow: both(
     'Indego: the cloud answered too slowly, the command was NOT sent (Gladys waits 5 s at most). Try again.',
+    "Indego : le cloud a répondu trop lentement, la commande n'a PAS été envoyée (Gladys attend 5 s au plus). Réessayez.",
+  ),
   commandStateUnknown: (reason) =>
-    `Indego: the state of the mower could not be read (${reason}), the command was NOT sent.`,
-  commandOffline: 'Indego: the mower is offline, the command was NOT sent.',
+    both(
+      `Indego: the state of the mower could not be read (${reason}), the command was NOT sent.`,
+      `Indego : l'état de la tondeuse n'a pas pu être lu (${reason}), la commande n'a PAS été envoyée.`,
+    ),
+  commandOffline: both(
+    'Indego: the mower is offline, the command was NOT sent.',
+    "Indego : la tondeuse est hors ligne, la commande n'a PAS été envoyée.",
+  ),
   commandRateLimited: (ms) =>
-    `Indego: too many requests, the command was NOT sent; the cloud asked to wait ${minutes(ms)} min.`,
-  commandSession: 'Indego: the Bosch session is not usable right now, the command was NOT sent.',
-  unknownMower: (value) => `Unknown Indego mower: ${String(value).slice(0, 80)}`,
+    both(
+      `Indego: too many requests, the command was NOT sent; the cloud asked to wait ${minutes(ms)} min.`,
+      `Indego : trop de requêtes, la commande n'a PAS été envoyée ; le cloud demande d'attendre ${minutes(ms)} min.`,
+    ),
+  commandSession: both(
+    'Indego: the Bosch session is not usable right now, the command was NOT sent.',
+    "Indego : la session Bosch n'est pas utilisable pour l'instant, la commande n'a PAS été envoyée.",
+  ),
+  commandUnconfirmed: both(
+    'Indego: command sent, but not confirmed in time; the state will be read again in 10 s.',
+    "Indego : commande envoyée, sans confirmation dans les temps ; l'état sera relu dans 10 s.",
+  ),
+  commandFailed: (reason) =>
+    both(
+      `Indego: the command failed (${reason}); the state will be read again in 10 s.`,
+      `Indego : la commande a échoué (${reason}) ; l'état sera relu dans 10 s.`,
+    ),
+  unknownMower: (value) =>
+    both(
+      `Unknown Indego mower: ${String(value).slice(0, 80)}`,
+      `Tondeuse Indego inconnue : ${String(value).slice(0, 80)}`,
+    ),
 };

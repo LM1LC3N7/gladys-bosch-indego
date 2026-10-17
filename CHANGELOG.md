@@ -23,7 +23,14 @@ the notes of the version's GitHub Release.
   plus spaced reads; back-off on errors, every call paused on HTTP 429.
 - Commands serialized per mower, with the state read right before, refused
   before sending when the cloud is too slow for Gladys' 5 s, and read back
-  after.
+  after. A stop (pause, back to the station) is always sent; a start is only
+  skipped while the mower mows and no other command is pending. A request
+  once sent is never cut: a late answer is reported as "sent, not confirmed".
+- Clear sign-in messages (cancelled, refused, Bosch unreachable, address
+  cut short by the console); the sign-in and the test answer at once and the
+  mowers are read in the background.
+- Battery, next mowing, alerts and mower details are read on their own: one
+  of them failing never blocks the state.
 - Scene trigger "Indego alert" on every new unread alert.
 - "Test Indego" action; English and French texts and documentation.
 
