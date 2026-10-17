@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-17
+
 ### Added
 
 - Sign-in with Bosch SingleKey ID (OAuth2 with PKCE) in two steps: the Connect
@@ -34,4 +36,5 @@ the notes of the version's GitHub Release.
 - Scene trigger "Indego alert" on every new unread alert.
 - "Test Indego" action; English and French texts and documentation.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-bosch-indego/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-bosch-indego/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-bosch-indego/releases/tag/v0.1.1

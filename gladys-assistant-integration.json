@@ -6,8 +6,8 @@
     "en": "Unofficial connector: Bosch Indego mowers, state, battery, progress, alerts, mow, pause, dock.",
     "fr": "Connecteur non officiel : tondeuses Bosch Indego, état, batterie, alertes, tonte, pause, retour."
   },
-  "version": "0.1.0",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-bosch-indego:0.1.0",
+  "version": "0.1.1",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-bosch-indego:0.1.1",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-bosch-indego/main/cover.png",
   "categories": ["appliances"],
