@@ -35,7 +35,7 @@ test('the store basics', () => {
   assert.equal(manifest.type, 'device');
   assert.ok(manifest.name.length <= 30, 'the store refuses a name over 30 characters');
   assert.match(manifest.gladys_version, />=5\.1\.0/);
-  assert.equal(manifest.version, '0.1.0');
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.equal(manifest.docker_image, `ghcr.io/lm1lc3n7/gladys-bosch-indego:${manifest.version}`);
   assert.equal(manifest.version, JSON.parse(read('package.json')).version);
   assert.equal(
