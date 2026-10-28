@@ -100,9 +100,10 @@ export const T = {
     last_alert: both('Last alert', 'Dernière alerte'),
     connected: both('Online', 'En ligne'),
   },
+  // Plain strings: the Gladys core refuses a publication whose option label is not one.
   runOptions: {
-    pause: both('Pause', 'Pause'),
-    mow: both('Mow', 'Tondre'),
+    pause: 'Pause',
+    mow: 'Mow',
   },
 
   // --- Connection status ---------------------------------------------------------

@@ -10,6 +10,12 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Plain string labels for the select options of the run mode, so Discovery lists
+  the devices (the Gladys core refused the whole publication because of
+  `{ en, fr }` labels).
+
 ## [0.1.2] - 2026-10-23
 
 ## [0.1.1] - 2026-10-17
