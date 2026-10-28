@@ -1,6 +1,6 @@
 {
   "name": "gladys-bosch-indego",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Gladys Assistant external integration for Bosch Indego robotic mowers through the Bosch cloud (Bosch SingleKey ID sign-in, REST and long poll). Unofficial, not affiliated with Bosch.",
   "type": "module",

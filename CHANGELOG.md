@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-28
+
 ### Fixed
 
 - Plain string labels for the select options of the run mode, so Discovery lists
@@ -44,6 +46,7 @@ the notes of the version's GitHub Release.
 - Scene trigger "Indego alert" on every new unread alert.
 - "Test Indego" action; English and French texts and documentation.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-bosch-indego/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-bosch-indego/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/LM1LC3N7/gladys-bosch-indego/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/LM1LC3N7/gladys-bosch-indego/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-bosch-indego/releases/tag/v0.1.1
